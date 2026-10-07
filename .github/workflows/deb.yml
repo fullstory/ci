@@ -39,10 +39,20 @@ jobs:
           - arch: amd64
             runner: ubuntu-26.04
             build: full
-          # arm64 binaries only
+            files: |
+              *.changes
+              *.buildinfo
+              *.dsc
+              *.tar.*
+              *.deb
+          # arm64 binaries only; never the source, whose orig both jobs may have fetched
           - arch: arm64
             runner: ubuntu-26.04-arm
             build: any
+            files: |
+              *.changes
+              *.buildinfo
+              *.deb
     runs-on: ${{ matrix.runner }}
     container: debian:sid
     steps:
@@ -118,12 +128,7 @@ jobs:
         if: steps.arch.outputs.skip != 'true'
         with:
           name: deb-${{ matrix.arch }}
-          path: |
-            *.changes
-            *.buildinfo
-            *.dsc
-            *.tar.*
-            *.deb
+          path: ${{ matrix.files }}
           if-no-files-found: error
 
       - name: Lintian
