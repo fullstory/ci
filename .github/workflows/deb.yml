@@ -29,6 +29,7 @@ permissions: {}
 
 jobs:
   build:
+    name: build ${{ matrix.arch }}
     permissions:
       contents: read
     strategy:
