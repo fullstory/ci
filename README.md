@@ -21,4 +21,7 @@ artifacts `deb-amd64` and `deb-arm64`. Callers pin `@v1`:
           ref: refs/tags/${{ github.ref_name }}
 
 Inputs: `ref` (required), `repository` (owner/repo, the caller when
-empty) and `version` (set with dch before the build, for pre-releases).
+empty), `version` (set with dch before the build, for pre-releases) and
+`prepare` (shell run in the source before the build, as root; a
+debian-only quilt package such as linux-aptosid fetches and unpacks its
+orig there).

@@ -20,6 +20,10 @@ on:
         description: version to set with dch before the build
         type: string
         default: ''
+      prepare:
+        description: shell run in the source as root before the build-dep install, e.g. to fetch a quilt package's orig
+        type: string
+        default: ''
 
 permissions: {}
 
@@ -86,6 +90,11 @@ jobs:
           # keep the changelog's maintainer
           DEBEMAIL=$(dpkg-parsechangelog -SMaintainer) \
             dch -b -v "$VERSION" -D UNRELEASED "CI build of $REPOSITORY@$(git rev-parse --short=7 HEAD)."
+
+      - name: Prepare the source
+        if: inputs.prepare != ''
+        working-directory: src
+        run: ${{ inputs.prepare }}
 
       - name: Install build dependencies
         run: apt-get build-dep -y --no-install-recommends ./src
