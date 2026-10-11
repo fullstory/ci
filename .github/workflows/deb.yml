@@ -150,7 +150,7 @@ jobs:
           $lintian_opts = ['--info'];
           $piuparts_opts = ['--no-eatmydata', '--distribution=%r', '--arch=%a',
             '--mirror=http://deb.debian.org/debian', '--fake-essential-packages=systemd-sysv',
-            '--bootstrapcmd=mmdebstrap --skip=check/empty --variant=minbase'];
+            '--bootstrapcmd=mmdebstrap --skip=check/empty --variant=minbase', '--scriptsdir=/etc/piuparts/scripts'];
           $autopkgtest_opts = ['--apt-upgrade', '--', 'unshare', '--release', '%r', '--arch', '%a'];
           EOF
           chown builder: /home/builder/.config/sbuild/config.pl
@@ -158,6 +158,7 @@ jobs:
             unstable "/home/builder/.cache/sbuild/unstable-$ARCH.tar.zst" http://deb.debian.org/debian
 
       - name: Build
+        id: build
         if: steps.arch.outputs.skip != 'true'
         working-directory: out
         run: |
@@ -167,7 +168,7 @@ jobs:
             ../*.dsc
 
       - name: Report
-        if: always() && steps.arch.outputs.skip != 'true'
+        if: always() && steps.build.outcome != 'skipped'
         working-directory: out
         run: |
           summary=$(grep -hE '^(Status|Fail-Stage|Lintian|Piuparts|Autopkgtest):' *_${{ matrix.arch }}.build) || exit 0
