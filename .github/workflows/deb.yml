@@ -141,6 +141,8 @@ jobs:
           ARCH: ${{ matrix.arch }}
           DEV_REPO: ${{ inputs.dev-repo }}
         run: |
+          # the runner's hardware, for comparing build times
+          lscpu | grep -E '^(Model name|CPU\(s\)):'
           useradd -m builder
           grep -q '^builder:' /etc/subuid ||
             usermod --add-subuids 100000-165535 --add-subgids 100000-165535 builder
