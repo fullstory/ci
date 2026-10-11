@@ -29,8 +29,12 @@ empty), `version` (set with dch before the build, for pre-releases),
 `prepare` (shell run in the source as root before the source package is
 made; a debian-only quilt package such as linux-aptosid fetches and
 unpacks its orig there, and what it installs never reaches the build),
-`piuparts` and `autopkgtest` (both on by default; off for sources whose
-dependencies are not all in Debian, or too costly to test).
+`piuparts` and `autopkgtest` (both on by default; off for sources too
+costly to test) and `dev-repo` (off by default; lets piuparts install
+from kel-mo/apt as well, for sources whose binaries depend on other
+aptosid packages, and so also tests the upgrade from the published
+version). With `dev-repo`, the job fetches kel-mo/apt's key and stops
+unless its fingerprint matches.
 
 The job container is privileged and lifts the runner's AppArmor
 restriction on unprivileged user namespaces, which sbuild's unshare mode
