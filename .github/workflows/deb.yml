@@ -190,7 +190,10 @@ jobs:
           # lintian, piuparts and autopkgtest report only
           echo "$tags" | sed -nE "s/^E: (.*)/::warning title=lintian $ARCH::\1/p; s/^W: (.*)/::notice title=lintian $ARCH::\1/p"
           echo "$summary" | sed -nE "s/^(Piuparts|Autopkgtest): (fail.*)/::warning::$ARCH \1: \2/p"
-          echo "$fails" | sed -nE "s/^ERROR: FAIL: (.*)/::warning title=piuparts $ARCH::\1/p"
+          echo "$fails" | awk -v t="piuparts $ARCH" '{ gsub(/%/, "%25"); gsub(/[ \t]+/, " ") }
+            /^ERROR: FAIL: / { if (m != "") print "::warning title=" t "::" m; m = substr($0, 14); next }
+            { sub(/^ /, ""); m = m "%0A" $0 }
+            END { if (m != "") print "::warning title=" t "::" m }'
 
       - uses: actions/upload-artifact@v7
         if: steps.arch.outputs.skip != 'true'
