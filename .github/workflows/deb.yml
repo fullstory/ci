@@ -1,9 +1,9 @@
 name: deb
 
-# Build a Debian source in a sid container for amd64 and arm64, attest
-# every file and upload them as the artifacts deb-amd64 and deb-arm64.
-# Callers grant contents: read, id-token: write, attestations: write and
-# artifact-metadata: write; their release job needs contents: write.
+# Build a Debian source with sbuild in a clean sid chroot for amd64 and
+# arm64, attest every file and upload them as the artifacts deb-amd64 and
+# deb-arm64. Callers grant contents: read, id-token: write, attestations:
+# write and artifact-metadata: write; their release job needs contents: write.
 
 on:
   workflow_call:
@@ -21,9 +21,17 @@ on:
         type: string
         default: ''
       prepare:
-        description: shell run in the source as root before the build-dep install, e.g. to fetch a quilt package's orig
+        description: shell run in the source as root before dpkg-source -b, e.g. to fetch a quilt package's orig; what it installs never reaches the build
         type: string
         default: ''
+      piuparts:
+        description: test installing and purging the binaries with piuparts; reports only
+        type: boolean
+        default: true
+      autopkgtest:
+        description: run debian/tests with autopkgtest; reports only
+        type: boolean
+        default: true
 
 permissions: {}
 
@@ -39,28 +47,32 @@ jobs:
           # source + arch:all + amd64
           - arch: amd64
             runner: ubuntu-26.04
-            build: full
+            sbuild: --source --force-orig-source --arch-all --arch-any
             files: |
-              *.changes
-              *.buildinfo
-              *.dsc
-              *.tar.*
-              *.deb
+              out/*.changes
+              out/*.buildinfo
+              out/*.dsc
+              out/*.tar.*
+              out/*.deb
           # arm64 binaries only; never the source, whose orig both jobs may have fetched
           - arch: arm64
             runner: ubuntu-26.04-arm
-            build: any
+            sbuild: --no-arch-all --arch-any
             files: |
-              *.changes
-              *.buildinfo
-              *.deb
+              out/*.changes
+              out/*.buildinfo
+              out/*.deb
     runs-on: ${{ matrix.runner }}
-    container: debian:sid
+    container:
+      image: debian:sid
+      # sbuild's unshare mode needs user namespaces that can mount
+      options: --privileged
     steps:
       - name: Install build tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git dpkg-dev
+          apt-get install -y --no-install-recommends ca-certificates git dpkg-dev passwd \
+            sbuild mmdebstrap uidmap iproute2 zstd piuparts autopkgtest
 
       - uses: actions/checkout@v7
         with:
@@ -107,23 +119,61 @@ jobs:
         working-directory: src
         run: ${{ inputs.prepare }}
 
-      - name: Install build dependencies
-        run: apt-get build-dep -y --no-install-recommends ./src
+      - name: Build the source package
+        run: dpkg-source -b src
 
       - name: Check for arch-dependent packages
         id: arch
-        if: matrix.build == 'any'
-        working-directory: src
+        if: matrix.arch == 'arm64'
         run: |
-          if [ -z "$(dh_listpackages -a)" ]; then
+          if [ "$(sed -n 's/^Architecture: *//p' *.dsc)" = all ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::notice::no arch-dependent package for ${{ matrix.arch }}; arch:all comes from the amd64 build"
           fi
 
+      - name: Set up sbuild
+        if: steps.arch.outputs.skip != 'true'
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          useradd -m builder
+          grep -q '^builder:' /etc/subuid ||
+            usermod --add-subuids 100000-165535 --add-subgids 100000-165535 builder
+          # hosted runners restrict unprivileged user namespaces; the VM is thrown away
+          f=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          [ ! -e "$f" ] || echo 0 > "$f"
+          install -d -o builder -g builder out
+          runuser -u builder -- mkdir -p /home/builder/.cache/sbuild /home/builder/.config/sbuild
+          cat > /home/builder/.config/sbuild/config.pl << 'EOF'
+          $chroot_mode = 'unshare';
+          $run_lintian = 1;
+          $lintian_opts = ['--info'];
+          $piuparts_opts = ['--no-eatmydata', '--distribution=%r', '--arch=%a',
+            '--mirror=http://deb.debian.org/debian', '--fake-essential-packages=systemd-sysv',
+            '--bootstrapcmd=mmdebstrap --skip=check/empty --variant=minbase'];
+          $autopkgtest_opts = ['--apt-upgrade', '--', 'unshare', '--release', '%r', '--arch', '%a'];
+          EOF
+          chown builder: /home/builder/.config/sbuild/config.pl
+          runuser -u builder -- mmdebstrap --variant=buildd --skip=output/mknod --include=ca-certificates \
+            unstable "/home/builder/.cache/sbuild/unstable-$ARCH.tar.zst" http://deb.debian.org/debian
+
       - name: Build
         if: steps.arch.outputs.skip != 'true'
-        working-directory: src
-        run: dpkg-buildpackage --build=${{ matrix.build }} -us -uc -sa
+        working-directory: out
+        run: |
+          runuser -u builder -- sbuild --verbose -d unstable ${{ matrix.sbuild }} \
+            ${{ inputs.piuparts && '--run-piuparts' || '--no-run-piuparts' }} \
+            ${{ inputs.autopkgtest && '--run-autopkgtest' || '--no-run-autopkgtest' }} \
+            ../*.dsc
+
+      - name: Report
+        if: always() && steps.arch.outputs.skip != 'true'
+        working-directory: out
+        run: |
+          summary=$(grep -hE '^(Status|Fail-Stage|Lintian|Piuparts|Autopkgtest):' *_${{ matrix.arch }}.build) || exit 0
+          printf '### %s\n```\n%s\n```\n' "${{ matrix.arch }}" "$summary" >> "$GITHUB_STEP_SUMMARY"
+          # lintian, piuparts and autopkgtest report only
+          echo "$summary" | sed -nE 's/^(Lintian|Piuparts|Autopkgtest): (fail.*)/::warning::${{ matrix.arch }} \1: \2/p'
 
       - uses: actions/upload-artifact@v7
         if: steps.arch.outputs.skip != 'true'
@@ -131,15 +181,6 @@ jobs:
           name: deb-${{ matrix.arch }}
           path: ${{ matrix.files }}
           if-no-files-found: error
-
-      - name: Lintian
-        if: steps.arch.outputs.skip != 'true'
-        # reports only
-        continue-on-error: true
-        # after the build; its dependencies would mask missing Build-Depends
-        run: |
-          apt-get install -y --no-install-recommends lintian
-          lintian -i --fail-on none *.changes
 
   attest:
     needs: build
