@@ -36,6 +36,10 @@ on:
         description: let piuparts install from kel-mo/apt too, for binaries that depend on other aptosid packages
         type: boolean
         default: false
+      piuparts-ignore:
+        description: regexes, one per line, of paths piuparts should not report as left behind (its --ignore-regex)
+        type: string
+        default: ''
 
 permissions: {}
 
@@ -140,6 +144,7 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
           DEV_REPO: ${{ inputs.dev-repo }}
+          PIUPARTS_IGNORE: ${{ inputs.piuparts-ignore }}
         run: |
           # the runner's hardware, for comparing build times
           lscpu | grep -E '^(Model name|CPU\(s\)):'
@@ -173,6 +178,13 @@ jobs:
             '--bootstrapcmd=mmdebstrap --skip=check/empty --variant=minbase --include=ca-certificates',
             '--bindmount=/srv/kel-mo-apt',
             '--extra-repo=deb [signed-by=/srv/kel-mo-apt/kel-mo-apt.asc] https://kel-mo.github.io/apt sid main'];
+          EOF
+          fi
+          if [ -n "$PIUPARTS_IGNORE" ]; then
+            printf '%s\n' "$PIUPARTS_IGNORE" > /home/builder/.config/sbuild/piuparts-ignore
+            cat >> /home/builder/.config/sbuild/config.pl << 'EOF'
+          open(my $ignore, '<', '/home/builder/.config/sbuild/piuparts-ignore') or die $!;
+          push @$piuparts_opts, map { '--ignore-regex=' . s/^\s+|\s+$//gr } grep { /\S/ } <$ignore>;
           EOF
           fi
           chown builder: /home/builder/.config/sbuild/config.pl
