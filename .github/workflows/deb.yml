@@ -170,11 +170,27 @@ jobs:
       - name: Report
         if: always() && steps.build.outcome != 'skipped'
         working-directory: out
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          summary=$(grep -hE '^(Status|Fail-Stage|Lintian|Piuparts|Autopkgtest):' *_${{ matrix.arch }}.build) || exit 0
-          printf '### %s\n```\n%s\n```\n' "${{ matrix.arch }}" "$summary" >> "$GITHUB_STEP_SUMMARY"
+          log=$(ls *_"$ARCH".build 2> /dev/null) || exit 0
+          summary=$(grep -E '^(Status|Fail-Stage|Lintian|Piuparts|Autopkgtest):' "$log")
+          # lintian's tags without their explanations
+          tags=$(sed -n '/^Running lintian/,/^+-/p' "$log" | grep -E '^[EWIPX]: [^ ]+( [a-z]+)?: ' || true)
+          # piuparts' failures and the lines that explain them
+          fails=$(awk '/ERROR: FAIL: / { sub(/^[0-9m.s]+ /, ""); print; p = 1; next }
+            p && /^[ \t]/ { print; next } { p = 0 }' "$log")
+          {
+            printf '### %s\n```\n%s\n```\n' "$ARCH" "$summary"
+            [ -z "$tags" ] ||
+              printf '<details><summary>lintian: %s tags</summary>\n\n```\n%s\n```\n</details>\n\n' \
+                "$(echo "$tags" | wc -l)" "$tags"
+            [ -z "$fails" ] || printf 'piuparts:\n```\n%s\n```\n' "$fails"
+          } >> "$GITHUB_STEP_SUMMARY"
           # lintian, piuparts and autopkgtest report only
-          echo "$summary" | sed -nE 's/^(Lintian|Piuparts|Autopkgtest): (fail.*)/::warning::${{ matrix.arch }} \1: \2/p'
+          echo "$tags" | sed -nE "s/^E: (.*)/::warning title=lintian $ARCH::\1/p; s/^W: (.*)/::notice title=lintian $ARCH::\1/p"
+          echo "$summary" | sed -nE "s/^(Piuparts|Autopkgtest): (fail.*)/::warning::$ARCH \1: \2/p"
+          echo "$fails" | sed -nE "s/^ERROR: FAIL: (.*)/::warning title=piuparts $ARCH::\1/p"
 
       - uses: actions/upload-artifact@v7
         if: steps.arch.outputs.skip != 'true'
