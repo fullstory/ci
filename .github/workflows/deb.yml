@@ -60,7 +60,7 @@ jobs:
       - name: Install build tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git dpkg-dev lintian
+          apt-get install -y --no-install-recommends ca-certificates git dpkg-dev
 
       - uses: actions/checkout@v7
         with:
@@ -136,7 +136,10 @@ jobs:
         if: steps.arch.outputs.skip != 'true'
         # reports only
         continue-on-error: true
-        run: lintian -i --fail-on none *.changes
+        # after the build; its dependencies would mask missing Build-Depends
+        run: |
+          apt-get install -y --no-install-recommends lintian
+          lintian -i --fail-on none *.changes
 
   attest:
     needs: build
